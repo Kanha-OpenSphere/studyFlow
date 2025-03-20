@@ -9,6 +9,7 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { ApiResponse } from "../utils/apiResponse";
 import { ApiError } from "../utils/apiError";
 import { IUser } from "../types/interfaces";
+import jwt from "jsonwebtoken";
 
 const generateTokens = async(userId: Types.ObjectId) => {
   try{
@@ -29,6 +30,7 @@ const generateTokens = async(userId: Types.ObjectId) => {
   }
 }
 
+// register user
 const registerUser = asyncHandler(async(req, res) => {
   const {email, password, username } = req.body;
   
@@ -64,6 +66,115 @@ const registerUser = asyncHandler(async(req, res) => {
   )
 })
 
+// login user
+const loginUser = asyncHandler(async(req, res) => {
+  const {email, password} = req.body;
+
+  const user:any = await User.findOne({email});
+  if(!user) {
+    throw new ApiError(404, "User not found", []);
+  }
+
+  const isPasswordValid = await user.isPasswordCorrect(password);
+  if(!isPasswordValid) {
+    throw new ApiError(401, "Invalid password", []);
+  }
+
+  const {accessToken, refreshToken} = await generateTokens(user._id);
+
+  const logedInUser = await User.findById(user._id).select("-password -refreshToken");
+
+  const options:CookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none':'lax',
+  }
+
+  return res
+  .status(200)
+  .cookie("accessToken", accessToken, options)
+  .cookie("refreshToken", refreshToken, options)
+  .json(
+    new ApiResponse(
+      200,
+      {user: logedInUser, accessToken, refreshToken},
+      "User loged in successfully",
+      true
+    )
+  )
+})
+
+const getUser = asyncHandler(async(req, res) => {
+  const {user} = req.body;
+  const { accessToken, refreshToken } = await generateTokens(user._id);
+  const refreshedUser = await User.findByIdAndUpdate(user._id, {refreshToken: refreshToken}).select("-password -refreshToken");
+  const options: CookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  }
+  return res
+  .status(200)
+  .cookie("accessToken", accessToken, options)
+  .cookie("refreshToken", refreshToken, options)
+  .json(
+    new ApiResponse(
+      200,
+      {user: refreshedUser, accessToken, refreshToken},
+      "User fetched successfully",
+      true
+    )
+  )
+})
+
+
+const refreshAccessToken = asyncHandler(async (req, res) => {
+  const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
+  if(!incomingRefreshToken) {
+    throw new ApiError(401, "Unauthorized request")
+  }
+  
+  const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
+  if(!refreshTokenSecret) {
+    throw new ApiError(500, "Somthing went wrong accessing server secret")
+  }
+  const decodedToken:any = jwt.verify(
+    incomingRefreshToken,
+    refreshTokenSecret,
+  )
+
+  const user:any = await User.findById(decodedToken?._id)
+  if(!user) {
+    throw new ApiError(401, "Invalid refresh token")
+  }
+
+  // cheack if the refresh token has expired or used
+  if(incomingRefreshToken !== user?.refreshToken) {
+    throw new ApiError(401, "Refresh token has expired or used")
+  }
+  const options: CookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none':'lax',
+  };
+
+  const { accessToken, refreshToken: newRefreshToken } = await generateTokens(user._id)
+
+  return res
+  .status(200)
+  .cookie("accessToken", accessToken, options)
+  .cookie("refreshToken", newRefreshToken, options)
+  .json(
+    new ApiResponse(
+      200,
+      {
+        accessToken, refreshToken: newRefreshToken
+      },
+      "Access Token refreshed",
+      true
+    )
+  )
+})
 
 
 
@@ -78,7 +189,4 @@ const registerUser = asyncHandler(async(req, res) => {
 
 
 
-
-
-
-export { registerUser }
+export { registerUser, loginUser, getUser }
