@@ -7,11 +7,12 @@ import { app } from "./app";
 import { connectDB } from "./config/db";
 
 const nodeVersion = +process.version?.slice(1).split(".")[0] || 0;
+const PORT = process.env.PORT || 8080;
 
 const startServer = async () => {
-  app.listen(process.env.PORT || 8080, () => {
+  app.listen(PORT || 8080, () => {
     console.info(
-      `✅ server is running at: http://localhost:${process.env.PORT}`
+      `✅ server is running at: http://localhost:${PORT}`
     )
     console.log('😁 you are good to go now');
   })
